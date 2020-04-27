@@ -1,18 +1,7 @@
-import 'default_style_information.dart';
+part of flutter_local_notifications;
 
-/// Used to pass the content for an Android notification displayed using the big text style.
+/// Used to pass the content for an Android notification displayed using the big text style
 class BigTextStyleInformation extends DefaultStyleInformation {
-  const BigTextStyleInformation(
-    this.bigText, {
-    this.htmlFormatBigText = false,
-    this.contentTitle,
-    this.htmlFormatContentTitle = false,
-    this.summaryText,
-    this.htmlFormatSummaryText = false,
-    bool htmlFormatContent = false,
-    bool htmlFormatTitle = false,
-  }) : super(htmlFormatContent, htmlFormatTitle);
-
   /// Provide the longer text to be displayed in the big form of the template in place of the content text.
   final String bigText;
 
@@ -22,28 +11,37 @@ class BigTextStyleInformation extends DefaultStyleInformation {
   /// Set the first line of text after the detail section in the big form of the template.
   final String summaryText;
 
-  /// Specifies if formatting should be applied to the longer text through HTML markup.
+  /// Specifies if formatting should be applied to the longer text through HTML markup
   final bool htmlFormatBigText;
 
-  /// Specifies if the overridden ContentTitle should have formatting applies through HTML markup.
+  /// Specifies if the overridden ContentTitle should have formatting applies through HTML markup
   final bool htmlFormatContentTitle;
 
   /// Specifies if formatting should be applied to the first line of text after the detail section in the big form of the template.
   final bool htmlFormatSummaryText;
 
-  /// Creates a [Map] object that describes the [BigTextStyleInformation] object.
-  ///
-  /// Mainly for internal use to send the data over a platform channel.
-  @override
+  BigTextStyleInformation(this.bigText,
+      {this.htmlFormatBigText = false,
+      this.contentTitle,
+      this.htmlFormatContentTitle = false,
+      this.summaryText,
+      this.htmlFormatSummaryText = false,
+      bool htmlFormatContent = false,
+      bool htmlFormatTitle = false})
+      : super(htmlFormatContent, htmlFormatTitle);
+
   Map<String, dynamic> toMap() {
-    return super.toMap()
-      ..addAll(<String, dynamic>{
-        'bigText': bigText,
-        'htmlFormatBigText': htmlFormatBigText,
-        'contentTitle': contentTitle,
-        'htmlFormatContentTitle': htmlFormatContentTitle,
-        'summaryText': summaryText,
-        'htmlFormatSummaryText': htmlFormatSummaryText
-      });
+    var styleJson = super.toMap();
+
+    var bigTextStyleJson = <String, dynamic>{
+      'bigText': bigText,
+      'htmlFormatBigText': htmlFormatBigText,
+      'contentTitle': contentTitle,
+      'htmlFormatContentTitle': htmlFormatContentTitle,
+      'summaryText': summaryText,
+      'htmlFormatSummaryText': htmlFormatSummaryText
+    };
+    styleJson.addAll(bigTextStyleJson);
+    return styleJson;
   }
 }

@@ -2,22 +2,14 @@
 #import "NotificationTime.h"
 #import "NotificationDetails.h"
 
+static bool appResumingFromBackground;
 
+@implementation FlutterLocalNotificationsPlugin
 
-@implementation FlutterLocalNotificationsPlugin{
-    FlutterMethodChannel* _channel;
-    bool _displayAlert;
-    bool _playSound;
-    bool _updateBadge;
-    bool _initialized;
-    bool _launchingAppFromNotification;
-    NSUserDefaults *_persistentState;
-    NSObject<FlutterPluginRegistrar> *_registrar;
-    NSString *_launchPayload;
-    UILocalNotification *_launchNotification;
-}
-
+FlutterMethodChannel* channel;
+// FlutterMethodChannel* callbackChannel;
 NSString *const INITIALIZE_METHOD = @"initialize";
+NSString *const INITIALIZED_HEADLESS_SERVICE_METHOD = @"initializedHeadlessService";
 NSString *const SHOW_METHOD = @"show";
 NSString *const SCHEDULE_METHOD = @"schedule";
 NSString *const PERIODICALLY_SHOW_METHOD = @"periodicallyShow";
@@ -25,22 +17,17 @@ NSString *const SHOW_DAILY_AT_TIME_METHOD = @"showDailyAtTime";
 NSString *const SHOW_WEEKLY_AT_DAY_AND_TIME_METHOD = @"showWeeklyAtDayAndTime";
 NSString *const CANCEL_METHOD = @"cancel";
 NSString *const CANCEL_ALL_METHOD = @"cancelAll";
-NSString *const PENDING_NOTIFICATIONS_REQUESTS_METHOD = @"pendingNotificationRequests";
 NSString *const GET_NOTIFICATION_APP_LAUNCH_DETAILS_METHOD = @"getNotificationAppLaunchDetails";
 NSString *const CHANNEL = @"dexterous.com/flutter/local_notifications";
 NSString *const CALLBACK_CHANNEL = @"dexterous.com/flutter/local_notifications_background";
 NSString *const ON_NOTIFICATION_METHOD = @"onNotification";
 NSString *const DID_RECEIVE_LOCAL_NOTIFICATION = @"didReceiveLocalNotification";
-NSString *const REQUEST_PERMISSIONS_METHOD = @"requestPermissions";
 
 NSString *const DAY = @"day";
 
 NSString *const REQUEST_SOUND_PERMISSION = @"requestSoundPermission";
 NSString *const REQUEST_ALERT_PERMISSION = @"requestAlertPermission";
 NSString *const REQUEST_BADGE_PERMISSION = @"requestBadgePermission";
-NSString *const SOUND_PERMISSION = @"sound";
-NSString *const ALERT_PERMISSION = @"alert";
-NSString *const BADGE_PERMISSION = @"badge";
 NSString *const DEFAULT_PRESENT_ALERT = @"defaultPresentAlert";
 NSString *const DEFAULT_PRESENT_SOUND = @"defaultPresentSound";
 NSString *const DEFAULT_PRESENT_BADGE = @"defaultPresentBadge";
@@ -51,13 +38,9 @@ NSString *const ID = @"id";
 NSString *const TITLE = @"title";
 NSString *const BODY = @"body";
 NSString *const SOUND = @"sound";
-NSString *const ATTACHMENTS = @"attachments";
-NSString *const ATTACHMENT_IDENTIFIER = @"identifier";
-NSString *const ATTACHMENT_FILE_PATH = @"filePath";
 NSString *const PRESENT_ALERT = @"presentAlert";
 NSString *const PRESENT_SOUND = @"presentSound";
 NSString *const PRESENT_BADGE = @"presentBadge";
-NSString *const BADGE_NUMBER = @"badgeNumber";
 NSString *const MILLISECONDS_SINCE_EPOCH = @"millisecondsSinceEpoch";
 NSString *const REPEAT_INTERVAL = @"repeatInterval";
 NSString *const REPEAT_TIME = @"repeatTime";
@@ -68,7 +51,18 @@ NSString *const SECOND = @"second";
 NSString *const NOTIFICATION_ID = @"NotificationId";
 NSString *const PAYLOAD = @"payload";
 NSString *const NOTIFICATION_LAUNCHED_APP = @"notificationLaunchedApp";
+NSString *launchPayload;
+bool displayAlert;
+bool playSound;
+bool updateBadge;
+bool initialized;
+bool launchingAppFromNotification;
+FlutterHeadlessDartRunner  *headlessRunner;
+NSUserDefaults *persistentState;
+NSObject<FlutterPluginRegistrar> *_registrar;
 
++ (bool) resumingFromBackground { return appResumingFromBackground; }
+UILocalNotification *launchNotification;
 
 typedef NS_ENUM(NSInteger, RepeatInterval) {
     EveryMinute,
@@ -77,87 +71,35 @@ typedef NS_ENUM(NSInteger, RepeatInterval) {
     Weekly
 };
 
-static FlutterError *getFlutterError(NSError *error) {
-  return [FlutterError errorWithCode:[NSString stringWithFormat:@"Error %d", (int)error.code]
-                             message:error.localizedDescription
-                             details:error.domain];
-}
 
 + (void)registerWithRegistrar:(NSObject<FlutterPluginRegistrar>*)registrar {
-    FlutterMethodChannel *channel = [FlutterMethodChannel
-                                     methodChannelWithName:CHANNEL
-                                     binaryMessenger:[registrar messenger]];
-    
-    FlutterLocalNotificationsPlugin* instance = [[FlutterLocalNotificationsPlugin alloc] initWithChannel:channel registrar:registrar];
+    channel = [FlutterMethodChannel
+               methodChannelWithName:CHANNEL
+               binaryMessenger:[registrar messenger]];
+    persistentState = [NSUserDefaults standardUserDefaults];
+    FlutterLocalNotificationsPlugin* instance = [[FlutterLocalNotificationsPlugin alloc] init];
+    headlessRunner = [[FlutterHeadlessDartRunner alloc] init];
+    // callbackChannel = [FlutterMethodChannel methodChannelWithName:CALLBACK_CHANNEL binaryMessenger:headlessRunner];
+    if(@available(iOS 10.0, *)) {
+        UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
+        center.delegate = instance;
+    }
     [registrar addApplicationDelegate:instance];
     [registrar addMethodCallDelegate:instance channel:channel];
-}
-
-- (instancetype)initWithChannel:(FlutterMethodChannel *)channel registrar:(NSObject<FlutterPluginRegistrar> *)registrar {
-    self = [super init];
-    
-    if (self) {
-        _channel = channel;
-        _registrar = registrar;
-        _persistentState = [NSUserDefaults standardUserDefaults];
-    }
-    
-    return self;
-}
-
-- (void)pendingNotificationRequests:(FlutterResult _Nonnull)result {
-    if(@available(iOS 10.0, *)) {
-        UNUserNotificationCenter *center =  [UNUserNotificationCenter currentNotificationCenter];
-        [center getPendingNotificationRequestsWithCompletionHandler:^(NSArray<UNNotificationRequest *> * _Nonnull requests) {
-            NSMutableArray<NSMutableDictionary<NSString *, NSObject *> *> *pendingNotificationRequests = [[NSMutableArray alloc] initWithCapacity:[requests count]];
-            for (UNNotificationRequest *request in requests) {
-                NSMutableDictionary *pendingNotificationRequest = [[NSMutableDictionary alloc] init];
-                pendingNotificationRequest[ID] = request.content.userInfo[NOTIFICATION_ID];
-                if (request.content.title != nil) {
-                    pendingNotificationRequest[TITLE] = request.content.title;
-                }
-                if (request.content.body != nil) {
-                    pendingNotificationRequest[BODY] = request.content.body;
-                }
-                if (request.content.userInfo[PAYLOAD] != [NSNull null]) {
-                    pendingNotificationRequest[PAYLOAD] = request.content.userInfo[PAYLOAD];
-                }
-                [pendingNotificationRequests addObject:pendingNotificationRequest];
-            }
-            result(pendingNotificationRequests);
-        }];
-    } else {
-        NSArray *notifications = [UIApplication sharedApplication].scheduledLocalNotifications;
-        NSMutableArray<NSDictionary<NSString *, NSObject *> *> *pendingNotificationRequests = [[NSMutableArray alloc] initWithCapacity:[notifications count]];
-        for( int i = 0; i < [notifications count]; i++) {
-            UILocalNotification* localNotification = [notifications objectAtIndex:i];
-            NSMutableDictionary *pendingNotificationRequest = [[NSMutableDictionary alloc] init];
-            pendingNotificationRequest[ID] = localNotification.userInfo[NOTIFICATION_ID];
-            if (localNotification.userInfo[TITLE] != [NSNull null]) {
-                pendingNotificationRequest[TITLE] = localNotification.userInfo[TITLE];
-            }
-            if (localNotification.alertBody) {
-                pendingNotificationRequest[BODY] = localNotification.alertBody;
-            }
-            if (localNotification.userInfo[PAYLOAD] != [NSNull null]) {
-                pendingNotificationRequest[PAYLOAD] = localNotification.userInfo[PAYLOAD];
-            }
-            [pendingNotificationRequests addObject:pendingNotificationRequest];
-        }
-        result(pendingNotificationRequests);
-    }
+    _registrar = registrar;
 }
 
 - (void)initialize:(FlutterMethodCall * _Nonnull)call result:(FlutterResult _Nonnull)result {
+    appResumingFromBackground = false;
     NSDictionary *arguments = [call arguments];
     if(arguments[DEFAULT_PRESENT_ALERT] != [NSNull null]) {
-        _displayAlert = [[arguments objectForKey:DEFAULT_PRESENT_ALERT] boolValue];
+        displayAlert = [[arguments objectForKey:DEFAULT_PRESENT_ALERT] boolValue];
     }
     if(arguments[DEFAULT_PRESENT_SOUND] != [NSNull null]) {
-        _playSound = [[arguments objectForKey:DEFAULT_PRESENT_SOUND] boolValue];
+        playSound = [[arguments objectForKey:DEFAULT_PRESENT_SOUND] boolValue];
     }
     if(arguments[DEFAULT_PRESENT_BADGE] != [NSNull null]) {
-        _updateBadge = [[arguments objectForKey:DEFAULT_PRESENT_BADGE] boolValue];
+        updateBadge = [[arguments objectForKey:DEFAULT_PRESENT_BADGE] boolValue];
     }
     bool requestedSoundPermission = false;
     bool requestedAlertPermission = false;
@@ -171,86 +113,61 @@ static FlutterError *getFlutterError(NSError *error) {
     if (arguments[REQUEST_BADGE_PERMISSION] != [NSNull null]) {
         requestedBadgePermission = [arguments[REQUEST_BADGE_PERMISSION] boolValue];
     }
-    [self requestPermissionsImpl:requestedSoundPermission alertPermission:requestedAlertPermission badgePermission:requestedBadgePermission checkLaunchNotification:true result:result];
-    
-    _initialized = true;
-}
-
-- (void)requestPermissions:(FlutterMethodCall * _Nonnull)call result:(FlutterResult _Nonnull)result {
-    NSDictionary *arguments = [call arguments];
-    bool soundPermission = false;
-    bool alertPermission = false;
-    bool badgePermission = false;
-    if (arguments[SOUND_PERMISSION] != [NSNull null]) {
-        soundPermission = [arguments[SOUND_PERMISSION] boolValue];
-    }
-    if (arguments[ALERT_PERMISSION] != [NSNull null]) {
-        alertPermission = [arguments[ALERT_PERMISSION] boolValue];
-    }
-    if (arguments[BADGE_PERMISSION] != [NSNull null]) {
-        badgePermission = [arguments[BADGE_PERMISSION] boolValue];
-    }
-    [self requestPermissionsImpl:soundPermission alertPermission:alertPermission badgePermission:badgePermission checkLaunchNotification:false result:result];
-}
-
-- (void)requestPermissionsImpl:(bool)soundPermission
-               alertPermission:(bool)alertPermission
-               badgePermission:(bool)badgePermission
-       checkLaunchNotification:(bool)checkLaunchNotification result:(FlutterResult _Nonnull)result{
+    /*if (call.arguments[ON_NOTIFICATION_CALLBACK_DISPATCHER] != [NSNull null]) {
+        [self startHeadlessService:[call.arguments[CALLBACK_DISPATCHER] longValue]];
+        [self setCallbackDispatcherHandle:[call.arguments[ON_NOTIFICATION_CALLBACK_DISPATCHER] longValue] key:ON_NOTIFICATION_CALLBACK_DISPATCHER];
+    } else {
+        [persistentState removeObjectForKey:ON_NOTIFICATION_CALLBACK_DISPATCHER];
+    }*/
     if(@available(iOS 10.0, *)) {
         UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
-        
         UNAuthorizationOptions authorizationOptions = 0;
-        if (soundPermission) {
+        if (requestedSoundPermission) {
             authorizationOptions += UNAuthorizationOptionSound;
         }
-        if (alertPermission) {
+        if (requestedAlertPermission) {
             authorizationOptions += UNAuthorizationOptionAlert;
         }
-        if (badgePermission) {
+        if (requestedBadgePermission) {
             authorizationOptions += UNAuthorizationOptionBadge;
         }
         [center requestAuthorizationWithOptions:(authorizationOptions) completionHandler:^(BOOL granted, NSError * _Nullable error) {
-            if(checkLaunchNotification && self->_launchPayload != nil) {
-                [self handleSelectNotification:self->_launchPayload];
+            if(launchPayload != nil) {
+                [FlutterLocalNotificationsPlugin handleSelectNotification:launchPayload];
             }
             result(@(granted));
         }];
     } else {
         UIUserNotificationType notificationTypes = 0;
-        if (soundPermission) {
+        if (requestedSoundPermission) {
             notificationTypes |= UIUserNotificationTypeSound;
         }
-        if (alertPermission) {
+        if (requestedAlertPermission) {
             notificationTypes |= UIUserNotificationTypeAlert;
         }
-        if (badgePermission) {
+        if (requestedBadgePermission) {
             notificationTypes |= UIUserNotificationTypeBadge;
         }
         UIUserNotificationSettings *settings = [UIUserNotificationSettings settingsForTypes:notificationTypes categories:nil];
         [[UIApplication sharedApplication] registerUserNotificationSettings:settings];
-        if(checkLaunchNotification && _launchNotification != nil && [self isAFlutterLocalNotification:_launchNotification.userInfo]) {
-            NSString *payload = _launchNotification.userInfo[PAYLOAD];
-            [self handleSelectNotification:payload];
+        if(launchNotification != nil) {
+            NSString *payload = launchNotification.userInfo[PAYLOAD];
+            [channel invokeMethod:@"selectNotification" arguments:payload];
         }
         result(@YES);
     }
+    initialized = true;
 }
-
 
 - (void)showNotification:(FlutterMethodCall * _Nonnull)call result:(FlutterResult _Nonnull)result {
     NotificationDetails *notificationDetails = [[NotificationDetails alloc]init];
     notificationDetails.id = call.arguments[ID];
-    if(call.arguments[TITLE] != [NSNull null]) {
-        notificationDetails.title = call.arguments[TITLE];
-    }
-    if(call.arguments[BODY] != [NSNull null]) {
-        notificationDetails.body = call.arguments[BODY];
-    }
+    notificationDetails.title = call.arguments[TITLE];
+    notificationDetails.body = call.arguments[BODY];
     notificationDetails.payload = call.arguments[PAYLOAD];
-    notificationDetails.presentAlert = _displayAlert;
-    notificationDetails.presentSound = _playSound;
-    notificationDetails.presentBadge = _updateBadge;
+    notificationDetails.presentAlert = displayAlert;
+    notificationDetails.presentSound = playSound;
+    notificationDetails.presentBadge = updateBadge;
     if(call.arguments[PLATFORM_SPECIFICS] != [NSNull null]) {
         NSDictionary *platformSpecifics = call.arguments[PLATFORM_SPECIFICS];
         
@@ -263,24 +180,7 @@ static FlutterError *getFlutterError(NSError *error) {
         if(platformSpecifics[PRESENT_BADGE] != [NSNull null]) {
             notificationDetails.presentBadge = [[platformSpecifics objectForKey:PRESENT_BADGE] boolValue];
         }
-        if(platformSpecifics[BADGE_NUMBER] != [NSNull null]) {
-            notificationDetails.badgeNumber = [platformSpecifics objectForKey:BADGE_NUMBER];
-        }
         notificationDetails.sound = platformSpecifics[SOUND];
-        
-        if(platformSpecifics[ATTACHMENTS] != [NSNull null]) {
-            NSArray<NSDictionary *> *attachments = platformSpecifics[ATTACHMENTS];
-            if(attachments.count > 0) {
-                NSMutableArray<NotificationAttachment *> *models = [NSMutableArray arrayWithCapacity:attachments.count];
-                for (NSDictionary *attachment in attachments) {
-                    NotificationAttachment *model = [[NotificationAttachment alloc] init];
-                    model.identifier = attachment[ATTACHMENT_IDENTIFIER];
-                    model.filePath = attachment[ATTACHMENT_FILE_PATH];
-                    [models addObject:model];
-                }
-                notificationDetails.attachments = models;
-            }
-        }
     }
     if([SCHEDULE_METHOD isEqualToString:call.method]) {
         notificationDetails.secondsSinceEpoch = @([call.arguments[MILLISECONDS_SINCE_EPOCH] longLongValue] / 1000);
@@ -304,10 +204,10 @@ static FlutterError *getFlutterError(NSError *error) {
         notificationDetails.repeatInterval = @([call.arguments[REPEAT_INTERVAL] integerValue]);
     }
     if(@available(iOS 10.0, *)) {
-        [self showUserNotification:notificationDetails result:result];
-        return;
+        [self showUserNotification:notificationDetails];
+    } else {
+        [self showLocalNotification:notificationDetails];
     }
-    [self showLocalNotification:notificationDetails];
     result(nil);
 }
 
@@ -349,59 +249,60 @@ static FlutterError *getFlutterError(NSError *error) {
     } else if ([SHOW_METHOD isEqualToString:call.method] || [SCHEDULE_METHOD isEqualToString:call.method] || [PERIODICALLY_SHOW_METHOD isEqualToString:call.method] || [SHOW_DAILY_AT_TIME_METHOD isEqualToString:call.method]
                || [SHOW_WEEKLY_AT_DAY_AND_TIME_METHOD isEqualToString:call.method]) {
         [self showNotification:call result:result];
-    } else if([REQUEST_PERMISSIONS_METHOD isEqualToString:call.method]) {
-        [self requestPermissions:call result:result];
     } else if([CANCEL_METHOD isEqualToString:call.method]) {
         [self cancelNotification:call result:result];
     } else if([CANCEL_ALL_METHOD isEqualToString:call.method]) {
         [self cancelAllNotifications:result];
     } else if([GET_NOTIFICATION_APP_LAUNCH_DETAILS_METHOD isEqualToString:call.method]) {
         NSString *payload;
-        if(_launchNotification != nil) {
-            payload = _launchNotification.userInfo[PAYLOAD];
+        if(launchNotification != nil) {
+            payload = launchNotification.userInfo[PAYLOAD];
         } else {
-            payload = _launchPayload;
+            payload = launchPayload;
         }
-        NSDictionary *notificationAppLaunchDetails = [NSDictionary dictionaryWithObjectsAndKeys:[NSNumber numberWithBool:_launchingAppFromNotification], NOTIFICATION_LAUNCHED_APP, payload, PAYLOAD, nil];
+        NSDictionary *notificationAppLaunchDetails = [NSDictionary dictionaryWithObjectsAndKeys:[NSNumber numberWithBool:launchingAppFromNotification], NOTIFICATION_LAUNCHED_APP, payload, PAYLOAD, nil];
         result(notificationAppLaunchDetails);
-    } else if([PENDING_NOTIFICATIONS_REQUESTS_METHOD isEqualToString:call.method]) {
-        [self pendingNotificationRequests:result];
+    } else if([INITIALIZED_HEADLESS_SERVICE_METHOD isEqualToString:call.method]) {
+        result(nil);
     }
     else {
         result(FlutterMethodNotImplemented);
     }
 }
 
+/*- (void)startHeadlessService:(int64_t)handle {
+    [self setCallbackDispatcherHandle:handle key:CALLBACK_DISPATCHER];
+    FlutterCallbackInformation *info = [FlutterCallbackCache lookupCallbackInformation:handle];
+    NSAssert(info != nil, @"failed to find callback");
+    NSString *entrypoint = info.callbackName;
+    NSString *uri = info.callbackLibraryPath;
+    [headlessRunner runWithEntrypointAndLibraryUri:entrypoint libraryUri:uri];
+    [_registrar addMethodCallDelegate:self channel:callbackChannel];
+}
+
+- (void)setCallbackDispatcherHandle:(int64_t)handle key:(NSString *)handleKey {
+    [persistentState setObject:[NSNumber numberWithLongLong:handle]
+                         forKey:handleKey];
+}
+
+- (int64_t)getCallbackDispatcherHandle:(NSString *) handleKey {
+    id handle = [persistentState objectForKey:handleKey];
+    if (handle == nil) {
+        return 0;
+    }
+    return [handle longLongValue];
+}*/
+
 - (NSDictionary*)buildUserDict:(NSNumber *)id title:(NSString *)title presentAlert:(bool)presentAlert presentSound:(bool)presentSound presentBadge:(bool)presentBadge payload:(NSString *)payload {
     NSDictionary *userDict =[NSDictionary dictionaryWithObjectsAndKeys:id, NOTIFICATION_ID, title, TITLE, [NSNumber numberWithBool:presentAlert], PRESENT_ALERT, [NSNumber numberWithBool:presentSound], PRESENT_SOUND, [NSNumber numberWithBool:presentBadge], PRESENT_BADGE, payload, PAYLOAD, nil];
     return userDict;
 }
 
-- (BOOL)isAFlutterLocalNotification:(NSDictionary *)userInfo {
-    return userInfo != nil && userInfo[NOTIFICATION_ID] && userInfo[TITLE] && userInfo[PRESENT_ALERT] && userInfo[PRESENT_SOUND] && userInfo[PRESENT_BADGE] && userInfo[PAYLOAD];
-}
-
-- (void) showUserNotification:(NotificationDetails *) notificationDetails result:(FlutterResult _Nonnull)result NS_AVAILABLE_IOS(10.0) {
+- (void) showUserNotification:(NotificationDetails *) notificationDetails NS_AVAILABLE_IOS(10.0) {
     UNMutableNotificationContent* content = [[UNMutableNotificationContent alloc] init];
     UNNotificationTrigger *trigger;
     content.title = notificationDetails.title;
     content.body = notificationDetails.body;
-    content.badge = notificationDetails.badgeNumber;
-    if (notificationDetails.attachments) {
-        NSMutableArray<UNNotificationAttachment *> *attachments = [NSMutableArray arrayWithCapacity:notificationDetails.attachments.count];
-        for (NotificationAttachment *model in notificationDetails.attachments) {
-            NSError *error;
-            UNNotificationAttachment *attachment = [UNNotificationAttachment attachmentWithIdentifier:model.identifier
-                                                                                                  URL:[NSURL fileURLWithPath:model.filePath]
-                                                                                              options:nil error:&error];
-            if (error) {
-                result(getFlutterError(error));
-                return;
-            }
-            [attachments addObject:attachment];
-        }
-        content.attachments = attachments;
-    }
     if(notificationDetails.presentSound) {
         if(!notificationDetails.sound || [notificationDetails.sound isKindOfClass:[NSNull class]]) {
             content.sound = UNNotificationSound.defaultSound;
@@ -460,11 +361,9 @@ static FlutterError *getFlutterError(NSError *error) {
                                                   requestWithIdentifier:[notificationDetails.id stringValue] content:content trigger:trigger];
     UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
     [center addNotificationRequest:notificationRequest withCompletionHandler:^(NSError * _Nullable error) {
-        if (error == nil) {
-            result(nil);
-            return;
+        if (error != nil) {
+            NSLog(@"Unable to Add Notification Request");
         }
-        result(getFlutterError(error));
     }];
     
 }
@@ -472,7 +371,6 @@ static FlutterError *getFlutterError(NSError *error) {
 - (void) showLocalNotification:(NotificationDetails *) notificationDetails {
     UILocalNotification *notification = [[UILocalNotification alloc] init];
     notification.alertBody = notificationDetails.body;
-    notification.applicationIconBadgeNumber = [notificationDetails.badgeNumber integerValue];
     if(@available(iOS 8.2, *)) {
         notification.alertTitle = notificationDetails.title;
     }
@@ -544,69 +442,62 @@ static FlutterError *getFlutterError(NSError *error) {
     if(presentAlert) {
         presentationOptions |= UNNotificationPresentationOptionAlert;
     }
-    
     if(presentSound){
         presentationOptions |= UNNotificationPresentationOptionSound;
     }
-    
     if(presentBadge) {
         presentationOptions |= UNNotificationPresentationOptionBadge;
     }
     
+    /*int64_t callback = [self getCallbackDispatcherHandle:ON_NOTIFICATION_CALLBACK_DISPATCHER];
+    if (callback != 0) {
+        NSDictionary *arguments = [NSDictionary dictionaryWithObjectsAndKeys:@(callback),CALLBACK_DISPATCHER, notification.request.content.userInfo[NOTIFICATION_ID], ID, notification.request.content.title, TITLE, notification.request.content.body, BODY, notification.request.content.userInfo[PAYLOAD], PAYLOAD, nil];
+        [callbackChannel invokeMethod:ON_NOTIFICATION_METHOD arguments:arguments];
+    }*/
     completionHandler(presentationOptions);
 }
 
-- (void)handleSelectNotification:(NSString *)payload {
-    [_channel invokeMethod:@"selectNotification" arguments:payload];
++ (void)handleSelectNotification:(NSString *)payload {
+    [channel invokeMethod:@"selectNotification" arguments:payload];
 }
 
 - (void)userNotificationCenter:(UNUserNotificationCenter *)center
 didReceiveNotificationResponse:(UNNotificationResponse *)response
          withCompletionHandler:(void (^)(void))completionHandler NS_AVAILABLE_IOS(10.0) {
-    if ([response.actionIdentifier isEqualToString:UNNotificationDefaultActionIdentifier] && [self isAFlutterLocalNotification:response.notification.request.content.userInfo]) {
+    if ([response.actionIdentifier isEqualToString:UNNotificationDefaultActionIdentifier]) {
+        
         NSString *payload = (NSString *) response.notification.request.content.userInfo[PAYLOAD];
-        if(_initialized) {
-            [self handleSelectNotification:payload];
+        if(initialized) {
+            [FlutterLocalNotificationsPlugin handleSelectNotification:payload];
         } else {
-            _launchPayload = payload;
-            _launchingAppFromNotification = true;
+            launchPayload = payload;
+            launchingAppFromNotification = true;
         }
+        
     }
 }
 - (BOOL)application:(UIApplication *)application
 didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     if (launchOptions != nil) {
-        UILocalNotification *launchNotification = (UILocalNotification *)[launchOptions objectForKey:UIApplicationLaunchOptionsLocalNotificationKey];
-        _launchingAppFromNotification = launchNotification != nil && [self isAFlutterLocalNotification:launchNotification.userInfo];
-        if(_launchingAppFromNotification) {
-            _launchNotification = launchNotification;
-        }
+        launchNotification = (UILocalNotification *)[launchOptions objectForKey:UIApplicationLaunchOptionsLocalNotificationKey];
+        launchingAppFromNotification = launchNotification != nil;
     }
     
     return YES;
 }
 
+- (void)applicationDidEnterBackground:(UIApplication *)application {
+    appResumingFromBackground = true;
+}
+
+- (void)applicationDidBecomeActive:(UIApplication *)application {
+    appResumingFromBackground = false;
+}
+
 - (void)application:(UIApplication*)application
 didReceiveLocalNotification:(UILocalNotification*)notification {
-    if(@available(iOS 10.0, *)) {
-        return;
-    }
-    if(![self isAFlutterLocalNotification:notification.userInfo]) {
-        return;
-    }
-    
-    NSMutableDictionary *arguments = [[NSMutableDictionary alloc] init];
-    arguments[ID]= notification.userInfo[NOTIFICATION_ID];
-    if (notification.userInfo[TITLE] != [NSNull null]) {
-        arguments[TITLE] =notification.userInfo[TITLE];
-    }
-    if (notification.alertBody != nil) {
-        arguments[BODY] = notification.alertBody;
-    }
-    if (notification.userInfo[PAYLOAD] != [NSNull null]) {
-        arguments[PAYLOAD] =notification.userInfo[PAYLOAD];
-    }
-    [_channel invokeMethod:DID_RECEIVE_LOCAL_NOTIFICATION arguments:arguments];
+    NSDictionary *arguments = [NSDictionary dictionaryWithObjectsAndKeys:notification.userInfo[NOTIFICATION_ID], ID,notification.userInfo[TITLE], TITLE,notification.alertBody, BODY,  notification.userInfo[PAYLOAD], PAYLOAD, nil];
+    [channel invokeMethod:DID_RECEIVE_LOCAL_NOTIFICATION arguments:arguments];
 }
 
 @end

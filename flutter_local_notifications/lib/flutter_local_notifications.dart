@@ -1,33 +1,25 @@
-export 'package:flutter_local_notifications_platform_interface/flutter_local_notifications_platform_interface.dart'
-    show
-        PendingNotificationRequest,
-        RepeatInterval,
-        NotificationAppLaunchDetails;
+library flutter_local_notifications;
 
-export 'src/platform_specifics/android/styles/style_information.dart';
-export 'src/platform_specifics/android/styles/default_style_information.dart';
-export 'src/platform_specifics/android/styles/big_text_style_information.dart';
-export 'src/platform_specifics/android/styles/big_picture_style_information.dart';
-export 'src/platform_specifics/android/styles/inbox_style_information.dart';
-export 'src/platform_specifics/android/styles/media_style_information.dart';
-export 'src/platform_specifics/android/styles/messaging_style_information.dart';
-export 'src/platform_specifics/android/bitmap.dart';
-export 'src/platform_specifics/android/enums.dart'
-    hide AndroidBitmapSource, AndroidIconSource, AndroidNotificationSoundSource;
-export 'src/platform_specifics/android/icon.dart' hide AndroidIcon;
-export 'src/platform_specifics/android/initialization_settings.dart';
-export 'src/platform_specifics/android/notification_details.dart';
-export 'src/platform_specifics/android/notification_channel.dart';
-export 'src/platform_specifics/android/message.dart';
-export 'src/platform_specifics/android/person.dart';
-export 'src/platform_specifics/android/notification_sound.dart';
-export 'src/platform_specifics/ios/initialization_settings.dart';
-export 'src/platform_specifics/ios/notification_details.dart';
-export 'src/platform_specifics/ios/notification_attachment.dart';
-export 'src/notification_details.dart';
-export 'src/initialization_settings.dart';
-export 'src/flutter_local_notifications_plugin.dart';
-export 'src/platform_flutter_local_notifications.dart'
-    hide MethodChannelFlutterLocalNotificationsPlugin;
-export 'src/types.dart';
-export 'src/typedefs.dart';
+import 'dart:async';
+import 'dart:typed_data';
+import 'dart:ui';
+import 'package:flutter/services.dart';
+import 'package:meta/meta.dart';
+import 'package:platform/platform.dart';
+import 'package:flutter/material.dart';
+
+part 'src/platform_specifics/android/styles/style_information.dart';
+part 'src/platform_specifics/android/styles/default_style_information.dart';
+part 'src/platform_specifics/android/styles/big_text_style_information.dart';
+part 'src/platform_specifics/android/styles/big_picture_style_information.dart';
+part 'src/platform_specifics/android/styles/inbox_style_information.dart';
+part 'src/platform_specifics/android/enums.dart';
+part 'src/platform_specifics/android/initialization_settings.dart';
+part 'src/platform_specifics/android/notification_details.dart';
+part 'src/platform_specifics/ios/initialization_settings.dart';
+part 'src/platform_specifics/ios/notification_details.dart';
+part 'src/notification_details.dart';
+part 'src/initialization_settings.dart';
+part 'src/flutter_local_notifications.dart';
+part 'src/notification_app_launch_details.dart';
+// part 'src/callback_dispatcher.dart';
